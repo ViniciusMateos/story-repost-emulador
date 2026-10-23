@@ -16,20 +16,28 @@ import random
 import re
 import subprocess
 import sys
+import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import emulador  # noqa: E402
 
 ADB = emulador.ADB
-SERIAL = emulador.SERIAL
+# instância por THREAD: o story do brechó (instância dele) pode rodar ao mesmo tempo que o das segue
+_local = threading.local()
+_trava_estado = threading.RLock()
+
+
+def _serial():
+    return getattr(_local, "serial", None) or emulador.SERIAL
 
 
 def usar_serial(serial):
-    """Aponta os comandos adb (galeria, prints) pra outra instância — o story do BRECHÓ roda na
-    instância só dele (emulador.SERIAL_BRECHO). Chame de volta com emulador.SERIAL no fim."""
-    global SERIAL
-    SERIAL = serial
+    """Aponta os comandos adb (galeria, prints) DESTA thread pra outra instância — o story do
+    BRECHÓ roda na instância só dele (emulador.SERIAL_BRECHO). Chame de volta com emulador.SERIAL."""
+    _local.serial = serial
+
+
 PASTA = "/sdcard/Pictures/QuaseNada"
 R = "com.instagram.android:id/"
 CTA_PADRAO = "VER PEÇA"
@@ -45,7 +53,7 @@ def _sleep(a, b):
 
 
 def _adb(*args, timeout=60):
-    return subprocess.run([ADB, "-s", SERIAL, *args], capture_output=True, text=True, timeout=timeout)
+    return subprocess.run([ADB, "-s", _serial(), *args], capture_output=True, text=True, timeout=timeout)
 
 
 def _centro(b):
@@ -367,7 +375,7 @@ def gerar_stickers(peca, pasta):
 
 
 def _adb_bytes(*args):
-    return subprocess.run([ADB, "-s", SERIAL, *args], capture_output=True, timeout=60).stdout
+    return subprocess.run([ADB, "-s", _serial(), *args], capture_output=True, timeout=60).stdout
 
 
 def _limpar_indice():
@@ -585,24 +593,26 @@ def _salvar_estado(est):
 def escolher_pecas(conta, n, pecas):
     """Sorteia n peças (com post no IG) que ESTA conta ainda não postou no ciclo atual; quando o
     ciclo acaba (postou todas), recomeça. Mesmo rodízio do story antigo."""
-    est = _estado()
-    feitas = set((est.get(conta) or {}).get("ciclo", []))
-    disp = [p for p in pecas if p.get("code")]
-    novas = [p for p in disp if p["code"] not in feitas]
-    if len(novas) < n:   # ciclo acabou → recomeça (sem repetir as que já vão agora)
-        est.setdefault(conta, {})["ciclo"] = []
-        _salvar_estado(est)
-        novas = disp
+    with _trava_estado:
+        est = _estado()
+        feitas = set((est.get(conta) or {}).get("ciclo", []))
+        disp = [p for p in pecas if p.get("code")]
+        novas = [p for p in disp if p["code"] not in feitas]
+        if len(novas) < n:   # ciclo acabou → recomeça (sem repetir as que já vão agora)
+            est.setdefault(conta, {})["ciclo"] = []
+            _salvar_estado(est)
+            novas = disp
     random.shuffle(novas)
     return novas[:n]
 
 
 def marcar_postada(conta, code):
-    est = _estado()
-    c = est.setdefault(conta, {})
-    c.setdefault("ciclo", []).append(code)
-    c["ultimo"] = time.time()
-    _salvar_estado(est)
+    with _trava_estado:   # brechó e segue podem postar ao mesmo tempo (threads) → um de cada vez
+        est = _estado()
+        c = est.setdefault(conta, {})
+        c.setdefault("ciclo", []).append(code)
+        c["ultimo"] = time.time()
+        _salvar_estado(est)
 
 
 # ═══════════ FLUXO VERIFICADO (19/10, depois do lote de 10 com 5 stories errados) ═══════════
