@@ -341,37 +341,67 @@ COR_BRECHO = (255, 130, 52)
 STICKERS = ("Sticker. Pressiona",)
 
 
-def gerar_stickers(peca, pasta):
+CHAMADA_PADRAO = ["COMENTE “FILA” PARA", "GARANTIR A SUA!"]
+
+
+def _linhas_chamada(chamada):
+    """Texto da chamada do modo → linhas em MAIÚSCULAS (até 3, ~20 letras cada). Vazio = padrão."""
+    import textwrap
+    t = " ".join(str(chamada or "").split())
+    if not t:
+        return list(CHAMADA_PADRAO)
+    return textwrap.wrap(t.upper(), 20)[:3] or list(CHAMADA_PADRAO)
+
+
+LUPA_ABAIXO_DO_DEDO = 43   # px: o conta-gotas lê a cor no circulinho abaixo da gota, não no dedo
+
+
+def gerar_stickers(peca, pasta, mostrar_preco=True, chamada="", bloco=False):
     """PNGs transparentes da etiqueta (preço/tamanho, inclinada) e do CTA, na arte do story_card.
-    O CTA ganha margem transparente: o sticker de foto recorta imagem muito larga (5:1 cortava)."""
+    O CTA ganha margem transparente: o sticker de foto recorta imagem muito larga (5:1 cortava).
+    `mostrar_preco=False` → sem etiqueta; `chamada` = texto do modo (vazio = o padrão).
+    `bloco=True` → um QUADRADO LARANJA na faixa transparente de baixo da chamada: o conta-gotas pega
+    a cor nele e, com o fundo pintado da mesma cor, ele some. Devolve (tag, cta, bloco_rel) —
+    bloco_rel = centro do quadrado em fração da imagem (ou None)."""
     import etiqueta
     import story_card as sc
     from PIL import Image, ImageDraw
     os.makedirs(pasta, exist_ok=True)
     linhas = etiqueta.linhas(peca, peca.get("template") or peca.get("observacao") or "")
     tag_path = None
-    if linhas:
+    if linhas and mostrar_preco:
         tag = sc._etiqueta(linhas)
         tag_path = os.path.join(pasta, "qn_tag.png")
         tag.save(tag_path)
     f = sc._fonte_mao(68)
     W = 1080
-    textos = ["COMENTE “FILA” PARA", "GARANTIR A SUA!"]
+    textos = _linhas_chamada(chamada)
     alt = f.size + 18
     im = Image.new("RGBA", (W, alt * len(textos) + 40), (0, 0, 0, 0))
     dr = ImageDraw.Draw(im)
     for i, t in enumerate(textos):
         sc._linha_mao(dr, W / 2, 20 + alt * i + alt / 2, t, f)
     im = im.crop(im.getbbox())
-    # margem transparente até ~1,5:1 (proporção que o sticker de foto mostra inteira)
+    # margem transparente até ~1,5:1 (proporção que o sticker de foto mostra inteira); com o
+    # quadrado, garante uma faixa de baixo de pelo menos 35% da altura do texto (texto centrado)
     alvo_h = int(im.width / 1.5)
+    if bloco:
+        alvo_h = max(alvo_h, int(im.height * 1.7))
+    bloco_rel = None
     if alvo_h > im.height:
         fundo = Image.new("RGBA", (im.width, alvo_h), (0, 0, 0, 0))
-        fundo.paste(im, (0, (alvo_h - im.height) // 2), im)
+        topo = (alvo_h - im.height) // 2
+        fundo.paste(im, (0, topo), im)
+        if bloco:
+            faixa = alvo_h - (topo + im.height)            # faixa transparente de baixo
+            bw, bh = int(im.width * 0.2), int(faixa * 0.7)
+            x0, y0 = (im.width - bw) // 2, topo + im.height + (faixa - bh) // 2
+            ImageDraw.Draw(fundo).rectangle([x0, y0, x0 + bw, y0 + bh], fill=COR_BRECHO + (255,))
+            bloco_rel = ((x0 + bw / 2) / im.width, (y0 + bh / 2) / alvo_h)
         im = fundo
     cta_path = os.path.join(pasta, "qn_cta.png")
     im.save(cta_path)
-    return tag_path, cta_path
+    return tag_path, cta_path, bloco_rel
 
 
 def _adb_bytes(*args):
@@ -384,8 +414,10 @@ def _limpar_indice():
     1ª miniatura virava um arquivo apagado → sticker invisível (19/10). O MuMu imprime um
     'Segmentation fault' depois, mas o delete acontece."""
     _adb("shell", "content delete --uri content://media/external/images/media "
-                  "--where \"relative_path='Pictures/QuaseNada/'\"")
-    _adb("shell", f"rm -f {PASTA}/*; mkdir -p {PASTA}")
+                  "--where \"relative_path='Pictures/QuaseNada/'\"; "
+                  "content delete --uri content://media/external/video/media "
+                  "--where \"relative_path='Pictures/QuaseNada/'\"; "
+                  f"rm -f {PASTA}/*; mkdir -p {PASTA}")
 
 
 def _push_galeria(caminhos):
@@ -496,7 +528,7 @@ def _add_sticker_foto(d, indice, log=None):
     return None
 
 
-def _fundo_laranja(d, log=None):
+def _fundo_laranja(d, log=None, alvo=None, segurar=0.35):
     """Fundo com a cor EXATA do brechó: Desenhar → conta-gotas (a lupa nasce no centro da tela, em
     cima da imagem laranja que já foi posta como sticker) → segura no fundo (pinta a tela toda) →
     Concluído. NÃO tocar em pincel depois do conta-gotas: isso zera a cor (19/10)."""
@@ -518,14 +550,45 @@ def _fundo_laranja(d, log=None):
     if not eye.wait(timeout=5):
         _log(log, "  sem conta-gotas")
         return False
-    _sleep(0.5, 0.7)
-    d.click(*_centro(eye.info["bounds"]))
-    _sleep(0.8, 1.0)
+    eb = eye.info["bounds"]
     try:
         W, H = d.window_size()
     except Exception:
         W, H = 900, 1600
-    d.swipe(W // 2, int(H * 0.5), W // 2, int(H * 0.47), 0.4)   # solta a lupa na imagem laranja
+    # (tempos testados: encurtar aqui faz o conta-gotas não pegar a cor — 20/10)
+    # arrasta a lupa SEGURANDO e para um instante antes de soltar: soltar no fim de um swipe
+    # rápido não deixa o conta-gotas registrar a cor do ponto final (20/10)
+    ax, ay = alvo if alvo else (W // 2, int(H * 0.47))
+    x0, y0 = W // 2, int(H * 0.5)
+    # `segurar` maior = arrasto mais lento e pausa maior no alvo
+    passo = 0.03 if segurar <= 0.5 else 0.06
+    # CONFERE A COR ANTES DE PINTAR (21/10): depois de soltar, o botão do conta-gotas fica com a cor
+    # pega. Com as duas instâncias ligadas o modo conta-gotas às vezes não ativa a tempo e o bot
+    # pintava às cegas (29% caíam no caminho da imagem, +30s). Não pegou → toca de novo, espera
+    # mais o modo ativar e arrasta outra vez (só no quadrado; a imagem já confere depois).
+    for tent in range(3 if alvo else 1):
+        _sleep(0.5, 0.7)
+        d.click(*_centro(eb))
+        _sleep(0.8 + 0.7 * tent, 1.0 + 0.7 * tent)
+        d.touch.down(x0, y0)
+        for k in range(1, 9):
+            d.touch.move(int(x0 + (ax - x0) * k / 8), int(y0 + (ay - y0) * k / 8))
+            time.sleep(passo)
+        time.sleep(segurar)
+        d.touch.up(int(ax), int(ay))
+        if not alvo:
+            break
+        try:
+            _sleep(0.3, 0.4)
+            tela = _print_tela()
+            _local.ultimo_cg = (tela.copy(), (int(ax), int(ay)))   # vai pro diagnóstico se falhar
+            if _cor_no_conta_gotas(tela, eb):
+                if tent:
+                    _log(log, f"  conta-gotas pegou o laranja na {tent + 1}ª tentativa")
+                break
+        except Exception:
+            break
+        _log(log, "  conta-gotas não pegou o laranja — tentando de novo")
     _sleep(0.5, 0.7)
     d.long_click(W // 2, int(H * 0.105), 1.3)                   # segura no fundo → pinta tudo
     _sleep(0.7, 0.9)
@@ -536,7 +599,16 @@ def _fundo_laranja(d, log=None):
     return True
 
 
-def abrir_repost(d, code, log=None):
+def _cor_no_conta_gotas(tela, eb):
+    """O botão do conta-gotas (canto de baixo) fica pintado com a cor que a lupa pegou: confere se é
+    o laranja do brechó em 4 pontos do círculo (o ícone branco fica no meio)."""
+    cx, cy = (eb["left"] + eb["right"]) // 2, (eb["top"] + eb["bottom"]) // 2
+    r = max(6, (eb["right"] - eb["left"]) // 2)
+    pts = [(cx - r * 0.55, cy), (cx + r * 0.55, cy), (cx, cy - r * 0.55), (cx, cy + r * 0.55)]
+    return sum(_perto(_cor_px(tela, x, y)) for x, y in pts) >= 2
+
+
+def abrir_repost(d, code, log=None, _de_novo=False):
     """Post do brechó → enviar → 'Adicionar à história'. True se o editor abriu."""
     descartar_rascunho(d)
     _adb("shell", "am", "start", "-a", "android.intent.action.VIEW",
@@ -688,6 +760,31 @@ def _fundo_ok(W, H):
     return all(_perto(_cor_px(im, x, y)) for x, y in pts)
 
 
+_DIAG_CG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "logs", "conta_gotas")
+
+
+def _salvar_diag_cg(W, H):
+    """Conta-gotas não pegou: salva a tela logo depois de soltar a lupa (com o alvo marcado) e a
+    tela já pintada, em logs/conta_gotas/ (mantém só as 20 últimas)."""
+    try:
+        from PIL import ImageDraw
+        os.makedirs(_DIAG_CG, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        ult = getattr(_local, "ultimo_cg", None)
+        if ult:
+            im, (ax, ay) = ult
+            dr = ImageDraw.Draw(im)
+            sy = ay + LUPA_ABAIXO_DO_DEDO
+            dr.ellipse([ax - 8, sy - 8, ax + 8, sy + 8], outline=(0, 255, 0), width=3)
+            im.save(os.path.join(_DIAG_CG, f"{ts}_{_serial().split(':')[-1]}_lupa.png"))
+        _print_tela().save(os.path.join(_DIAG_CG, f"{ts}_{_serial().split(':')[-1]}_pintado.png"))
+        arqs = sorted(os.listdir(_DIAG_CG))
+        for a in arqs[:-40]:
+            os.remove(os.path.join(_DIAG_CG, a))
+    except Exception:
+        pass
+
+
 def _card_atual(d):
     """O card do post = o MAIOR sticker (largura > 60% da tela)."""
     try:
@@ -698,13 +795,17 @@ def _card_atual(d):
     return max(st, key=lambda b: (b[2] - b[0]) * (b[3] - b[1])) if st else None
 
 
-def postar_repost(d, peca, pasta, log=None, enviar=True, shot=None):
-    """Story da peça com verificação em cada etapa. 'ok' | 'simulado' | motivo (NÃO publicou)."""
+def postar_repost(d, peca, pasta, log=None, enviar=True, shot=None, fundo="laranja",
+                  mostrar_preco=True, chamada=""):
+    """Story da peça com verificação em cada etapa. 'ok' | 'simulado' | motivo (NÃO publicou).
+    `fundo`: 'laranja' (conta-gotas, o padrão) ou 'instagram' (o fundo que o IG gera — bem mais
+    rápido); `mostrar_preco`/`chamada` vêm do modo."""
     code = peca.get("code")
     if not code:
         return "sem_code"
-    tag_png, cta_png = gerar_stickers(peca, pasta)
-    fundo_png = gerar_fundo(pasta)
+    laranja = fundo != "instagram"
+    tag_png, cta_png, bloco_rel = gerar_stickers(peca, pasta, mostrar_preco, chamada, bloco=laranja)
+    fundo_png = None
     try:
         W, H = d.window_size()
     except Exception:
@@ -726,24 +827,45 @@ def postar_repost(d, peca, pasta, log=None, enviar=True, shot=None):
     d.click((card[0] + card[2]) // 2, (card[1] + card[3]) // 2)      # estilo com bordas/título
     _sleep(1.0, 1.3)
 
+    # fundo laranja, CAMINHO RÁPIDO: a chamada entra já (com o quadrado laranja escondido), o
+    # conta-gotas pega a cor no quadrado e pinta. Não pegou → caminho antigo (imagem laranja).
+    cta = None
+    pintado = False
+    if laranja and bloco_rel:
+        cta = _add_sticker_conferido(d, cta_png, log)
+        if not cta:
+            return falha("mensagem")
+        bx = cta[0] + bloco_rel[0] * (cta[2] - cta[0])
+        by = cta[1] + bloco_rel[1] * (cta[3] - cta[1])
+        # o conta-gotas lê ~43px ABAIXO do dedo (o circulinho debaixo da gota — medido 20/10)
+        _fundo_laranja(d, log, alvo=(bx, by - LUPA_ABAIXO_DO_DEDO))
+        pintado = _fundo_ok(W, H)
+        if not pintado:
+            # 21/10: só acontece com as DUAS instâncias ligadas (29% no lote; 0 de 7 com o brechó
+            # desligado). Segurar mais na 2ª tentativa NÃO resolveu (0/2) → sem causa ainda: guarda
+            # a tela da lupa + a pintada pra diagnosticar no próximo caso real
+            _salvar_diag_cg(W, H)
+            _log(log, "  cor não pegou pelo quadrado — usando a imagem laranja")
     # fundo laranja: imagem → conta-gotas → pinta → confere cor (até 2 tentativas) → apaga a imagem
-    fundo = _add_sticker_conferido(d, fundo_png, log)
-    if not fundo:
-        return falha("fundo_img")
-    for _t in range(2):
-        _fundo_laranja(d, log)
-        if _fundo_ok(W, H):
-            break
-        _log(log, "  fundo não ficou laranja — repetindo o conta-gotas")
-    else:
-        return falha("fundo_cor")
-    if not _apagar_sticker(d, fundo) or any(
-            abs((b[2] - b[0]) - (fundo[2] - fundo[0])) < 20 and abs((b[3] - b[1]) - (fundo[3] - fundo[1])) < 20
-            for b in _stickers_na_tela(d)):
-        return falha("fundo_nao_apagou")
-    card = _card_atual(d)
-    if not card:
-        return falha("card_apagado")
+    if laranja and not pintado:
+        fundo_png = gerar_fundo(pasta)
+        fundo = _add_sticker_conferido(d, fundo_png, log)
+        if not fundo:
+            return falha("fundo_img")
+        for _t in range(2):
+            _fundo_laranja(d, log)
+            if _fundo_ok(W, H):
+                break
+            _log(log, "  fundo não ficou laranja — repetindo o conta-gotas")
+        else:
+            return falha("fundo_cor")
+        if not _apagar_sticker(d, fundo) or any(
+                abs((b[2] - b[0]) - (fundo[2] - fundo[0])) < 20 and abs((b[3] - b[1]) - (fundo[3] - fundo[1])) < 20
+                for b in _stickers_na_tela(d)):
+            return falha("fundo_nao_apagou")
+        card = _card_atual(d)
+        if not card:
+            return falha("card_apagado")
 
     # sobe o card ~60px pra caber a mensagem embaixo
     yh = card[1] + 35
@@ -765,7 +887,14 @@ def postar_repost(d, peca, pasta, log=None, enviar=True, shot=None):
         if not tag:
             return falha("etiqueta")
         tag = _mover(d, tag, alvo_tag, log, outros=(card,))
-    cta = _add_sticker_conferido(d, cta_png, log)
+    if cta:
+        # a chamada já entrou (caminho rápido): acha ela de novo (o card subiu e a etiqueta entrou)
+        maior = (cta[2] - cta[0], cta[3] - cta[1])
+        cands = [b for b in _stickers_na_tela(d) if b not in (card, tag)
+                 and abs((b[2] - b[0]) - maior[0]) < 30 and abs((b[3] - b[1]) - maior[1]) < 30]
+        cta = cands[0] if cands else None
+    if not cta:
+        cta = _add_sticker_conferido(d, cta_png, log)
     if not cta:
         return falha("mensagem")
     cta = _mover(d, cta, alvo_cta, log, outros=tuple(b for b in (card, tag) if b))
@@ -774,7 +903,7 @@ def postar_repost(d, peca, pasta, log=None, enviar=True, shot=None):
     card = _card_atual(d)
     if not card:
         return falha("final:card")
-    if not _fundo_ok(W, H):
+    if laranja and not _fundo_ok(W, H):
         return falha("final:fundo")
     stk = [b for b in _stickers_na_tela(d) if b != card]
     def perto_de(alvo, tol=70):
@@ -797,14 +926,57 @@ def postar_repost(d, peca, pasta, log=None, enviar=True, shot=None):
     return "ok" if ok else "publicar"
 
 
-def postar_lote(d, conta, n, pasta, log=None, enviar=True, parar=None, tentativas=2):
+INTRO = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                     "assets", "intro.mp4")
+
+
+def postar_intro(d, log=None, enviar=True, shot=None):
+    """Vídeo de ABERTURA ("confiram as peças disponíveis") antes das peças: manda o intro.mp4 pra
+    galeria (sozinho), abre a galeria do story pelo '+' do perfil, escolhe a 1ª miniatura (o
+    vídeo) e publica. True se publicou (ou montou, sem `enviar`)."""
+    if not os.path.exists(INTRO):
+        _log(log, "  sem o vídeo de abertura (assets/intro.mp4) — sigo sem ele")
+        return False
+    _limpar_indice()
+    destino = f"{PASTA}/qn_intro.mp4"
+    _adb("push", INTRO, destino)
+    r = _adb("shell", f"touch {destino}; am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE "
+                      f"-d file://{destino} >/dev/null; for i in 1 2 3 4 5 6 7 8 9 10 11 12; do "
+                      f"content query --uri content://media/external/video/media --projection "
+                      f"_display_name | grep -q qn_intro.mp4 && echo INDEXADO && break; sleep 0.4; done")
+    if "INDEXADO" not in (r.stdout or ""):
+        _log(log, "  o vídeo de abertura não apareceu na galeria — sigo sem ele")
+        return False
+    if not abrir_editor_com_card(d, log, shot):
+        _log(log, "  não abri o editor com o vídeo de abertura — sigo sem ele")
+        descartar_rascunho(d)
+        return False
+    _sleep(1.5, 2.0)          # o vídeo leva ~1s pra carregar no editor (antes disso a prévia é preta)
+    if shot:
+        shot("intro_antes_de_publicar")
+    if not enviar:
+        descartar_rascunho(d)
+        _limpar_indice()
+        return True
+    return publicar(d, log)
+
+
+def postar_lote(d, conta, n, pasta, log=None, enviar=True, parar=None, tentativas=2,
+                pausa_story=(0, 0), fundo="laranja", mostrar_preco=True, chamada="", video_intro=False):
     """n stories na conta ATIVA; cada peça tem até `tentativas` (o fluxo só publica se passar na
-    conferência). Devolve {ok, postados, falhas}."""
+    conferência). `pausa_story` = respiro entre um story e outro; `fundo`/`mostrar_preco`/`chamada`
+    vêm do modo. Devolve {ok, postados, falhas}."""
+    import random
+    tentativas = max(1, int(tentativas or 1))
     import story_card as sc
     pecas = sc.fetch_pecas()
     escolhidas = escolher_pecas(conta, n, pecas)
     _log(log, f"Conta: @{conta} — {len(escolhidas)} peça(s) pro story: "
               + ", ".join((p.get("nome") or p["code"])[:24] for p in escolhidas))
+    if video_intro and escolhidas and not (parar and parar()):
+        _log(log, "abertura: vídeo \"confiram as peças disponíveis\"")
+        if postar_intro(d, log, enviar=enviar):
+            _log(log, "✓ vídeo de abertura " + ("publicado" if enviar else "montado (simulação)"))
     postados, falhas = 0, 0
     for i, p in enumerate(escolhidas, start=1):
         if parar and parar():
@@ -815,7 +987,8 @@ def postar_lote(d, conta, n, pasta, log=None, enviar=True, parar=None, tentativa
         r = "?"
         for tent in range(1, tentativas + 1):
             try:
-                r = postar_repost(d, p, pasta, log, enviar=enviar)
+                r = postar_repost(d, p, pasta, log, enviar=enviar, fundo=fundo,
+                                  mostrar_preco=mostrar_preco, chamada=chamada)
             except Exception as e:
                 r = f"erro:{e}"
                 descartar_rascunho(d)
@@ -831,5 +1004,13 @@ def postar_lote(d, conta, n, pasta, log=None, enviar=True, parar=None, tentativa
         else:
             falhas += 1
             _log(log, f"! story {i}/{len(escolhidas)} NÃO publicado ({r}) — {nome}")
+        if i < len(escolhidas) and pausa_story and pausa_story[1] > 0:
+            seg = random.uniform(*pausa_story)
+            _log(log, f"próximo story em {int(seg)}s…")
+            fim = time.time() + seg
+            while time.time() < fim:
+                if parar and parar():
+                    break
+                time.sleep(max(0.0, min(1.0, fim - time.time())))   # nunca negativo
     _log(log, f"[progress] {len(escolhidas)} {len(escolhidas)} concluído")
     return {"ok": falhas == 0, "postados": postados, "falhas": falhas}
