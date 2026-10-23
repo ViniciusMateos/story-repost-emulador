@@ -104,6 +104,24 @@ def _fechar_telas_extras(d, log=None):
             return
 
 
+def desfazer_republicar(d, log=None):
+    """Aviso "Republicaste a publicação de …" na tela = um toque caiu no botão de REPUBLICAR (no feed
+    da conta), não no de compartilhar no story. Toca em "Anular" (desfaz) e devolve True. Aconteceu na
+    segue8 em 22/10: o aviso ficou por cima e travou as 3 peças seguintes ("o post não abriu")."""
+    try:
+        if d(textContains="Republicaste a publica").exists or d(textContains="You reposted").exists:
+            for t in ("Anular", "Undo", "Desfazer"):
+                b = d(text=t)
+                if b.exists:
+                    b.click()
+                    _log(log, "  republicar no feed caiu sem querer — desfeito (Anular)")
+                    _sleep(1.0, 1.5)
+                    return True
+    except Exception:
+        pass
+    return False
+
+
 def descartar_rascunho(d):
     """Sai de folha de link / editor / câmera que tenha ficado aberta, descartando o rascunho
     (apertar 'voltar' às cegas no meio disso deixava a câmera fechando e o toque caía errado)."""
@@ -610,10 +628,13 @@ def _cor_no_conta_gotas(tela, eb):
 
 def abrir_repost(d, code, log=None, _de_novo=False):
     """Post do brechó → enviar → 'Adicionar à história'. True se o editor abriu."""
+    desfazer_republicar(d, log)
     descartar_rascunho(d)
     _adb("shell", "am", "start", "-a", "android.intent.action.VIEW",
          "-d", f"https://www.instagram.com/p/{code}/", "-p", "com.instagram.android")
     if not d(resourceId=R + "row_feed_button_share").wait(timeout=20):
+        if desfazer_republicar(d, log):     # o aviso por cima impedia o post de aparecer
+            return False if _de_novo else abrir_repost(d, code, log, _de_novo=True)
         _log(log, "  o post não abriu")
         return False
     _sleep(0.8, 1.1)
@@ -624,6 +645,7 @@ def abrir_repost(d, code, log=None, _de_novo=False):
         if _tocar(d, d(description="Adicionar à história"), 14):
             break
         _log(log, "  folha de enviar sem 'Adicionar à história' — reabrindo")
+        desfazer_republicar(d, log)
         d.press("back")
         _sleep(1.0, 1.5)
     else:
