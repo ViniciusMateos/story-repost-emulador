@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.0] — 2026-10-22
+
+### Adicionado
+- feat: story do brechó em paralelo com as segue (serial por thread)
+- feat: story com modo (fundo laranja ou do IG, preço, chamada, pausa), vídeo de abertura e conta-gotas conferido
+
+### Corrigido
+- fix: desfaz o republicar que caía sem querer no feed
+
+### Modificado
+- perf: story mais rápido (esperas menores e galeria num shell só)
+
+### Documentação
+- docs: README com modo, vídeo de abertura e conta-gotas
+
 ## [1.0.0] — 2026-10-20
 
 ### Adicionado
