@@ -309,8 +309,8 @@ def publicar(d, log=None):
     """Toca 'A tua história' e espera sair do editor. True se saiu."""
     if not _tocar(d, d(resourceId=R + "your_story_share_shortcut_button"), 8):
         return False
-    for _ in range(12):
-        _sleep(1.5, 2.0)
+    for _ in range(30):
+        _sleep(0.6, 0.8)
         if not d(resourceId=R + "quick_capture_root_container").exists:
             _fechar_telas_extras(d, log)
             return True
@@ -468,23 +468,28 @@ def _mover(d, ident, destino, log=None, outros=()):
     atual = ident
     for _ in range(4):
         cx, cy = (atual[0] + atual[2]) // 2, (atual[1] + atual[3]) // 2
-        if abs(cx - destino[0]) < 25 and abs(cy - destino[1]) < 25:
+        if abs(cx - destino[0]) < 30 and abs(cy - destino[1]) < 30:
             return atual
         try:
             _W, H = d.window_size()
         except Exception:
             H = 1600
-        ex = int(cx + (destino[0] - cx) / 0.8)
-        ey = int(cy + (destino[1] - cy) / 0.8)
+        # pega o sticker num ponto deslocado CONTRA o movimento vertical: o dedo termina mais
+        # longe da borda — descendo, não chega na lixeira e não precisa de 2ª correção (20/10)
+        h = atual[3] - atual[1]
+        off = int(h * 0.3) if destino[1] > cy + 30 else (-int(h * 0.3) if destino[1] < cy - 30 else 0)
+        gx, gy = cx, cy - off
+        ex = int(gx + (destino[0] - cx) / 0.8)
+        ey = int(gy + (destino[1] - cy) / 0.8)
         # o dedo NUNCA desce até a lixeira (rodapé): passou de ~86% da tela, o IG apaga o sticker
-        # (a mensagem sumiu assim — 19/10). Descendo, vai no alvo seco, sem compensar.
+        # (a mensagem sumiu assim — 19/10)
         if destino[1] > cy:
             ey = min(ey, int(H * 0.86))
-        # velocidade ~400px/s: devagar demais (ajuste curto em 1,2s) o IG lê como "segurar" e não
-        # move; rápido demais (flick) ele ignora
-        dist = ((ex - cx) ** 2 + (ey - cy) ** 2) ** 0.5
-        d.swipe(cx, cy, ex, ey, max(0.3, min(1.4, dist / 400)))
-        _sleep(0.6, 0.8)
+        # ~550px/s: devagar demais (ajuste curto lento) o IG lê como "segurar" e não move; rápido
+        # demais (flick) ele ignora
+        dist = ((ex - gx) ** 2 + (ey - gy) ** 2) ** 0.5
+        d.swipe(gx, gy, ex, ey, max(0.25, min(1.0, dist / 550)))
+        _sleep(0.4, 0.5)
         cands = [b for b in _stickers_na_tela(d) if b not in outros]
         if not cands:
             _log(log, "  perdi o sticker de vista ao mover")
@@ -504,9 +509,9 @@ def _apagar_sticker(d, b):
     for y in range(cy + 20, 1500, 40):
         d.touch.move(450, y)
         time.sleep(0.03)
-    time.sleep(0.5)
+    time.sleep(0.4)
     d.touch.up(450, 1490)
-    _sleep(0.8, 1.0)
+    _sleep(0.5, 0.7)
     return b not in _stickers_na_tela(d)
 
 
@@ -518,7 +523,7 @@ def _abrir_bandeja_stickers(d, alvo_desc):
         else:
             d.click(849, 129)
         if d(description=alvo_desc).wait(timeout=6):
-            _sleep(0.4, 0.6)
+            _sleep(0.25, 0.35)
             return _tocar(d, d(description=alvo_desc), 4)
         _sleep(1.2, 1.8)
     return False
@@ -534,12 +539,12 @@ def _add_sticker_foto(d, indice, log=None):
     th = d(resourceId=R + "gallery_sticker_grid_item_thumbnail")
     if not th.wait(timeout=8):
         return None
-    _sleep(0.5, 0.7)
+    _sleep(0.3, 0.4)
     if th.count <= indice:
         return None
     d.click(*_centro(th[indice].info["bounds"]))
-    for _ in range(8):
-        _sleep(0.6, 0.7)
+    for _ in range(14):
+        _sleep(0.3, 0.4)
         novos = [s for s in _stickers_na_tela(d) if s not in antes]
         if novos:
             return novos[-1]
@@ -637,7 +642,7 @@ def abrir_repost(d, code, log=None, _de_novo=False):
             return False if _de_novo else abrir_repost(d, code, log, _de_novo=True)
         _log(log, "  o post não abriu")
         return False
-    _sleep(0.8, 1.1)
+    _sleep(0.5, 0.7)
     # a folha de enviar às vezes demora a mostrar a fileira de baixo ("Adicionar à história") —
     # espera mais e, se não vier, fecha e abre de novo (no lote de 10, 2 peças caíram aqui)
     for tent in range(2):
@@ -651,7 +656,7 @@ def abrir_repost(d, code, log=None, _de_novo=False):
     else:
         return False
     ok = d(resourceId=R + "your_story_share_shortcut_button").wait(timeout=15)
-    _sleep(1.2, 1.5)
+    _sleep(0.8, 1.0)
     return ok
 
 
@@ -721,21 +726,18 @@ def marcar_postada(conta, code):
 
 
 def _galeria_so(caminho):
-    """Deixa a galeria do bot com UMA imagem só (a que vai virar sticker agora)."""
+    """Deixa a galeria do bot com UMA imagem só (a que vai virar sticker agora). Limpa, manda e
+    espera o índice de fotos ter a imagem — tudo num shell só depois do push (cada `content`/`am`
+    sobe uma JVM de ~1s no Android, então juntar economiza)."""
     _limpar_indice()
     destino = f"{PASTA}/{os.path.basename(caminho)}"
-    _adb("push", caminho, destino)
-    _adb("shell", "touch", destino)
-    _adb("shell", "am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
-         "-d", f"file://{destino}")
     nome = os.path.basename(caminho)
-    for _ in range(12):
-        r = _adb("shell", "content", "query", "--uri", "content://media/external/images/media",
-                 "--projection", "_display_name")
-        if nome in (r.stdout or ""):
-            return True
-        time.sleep(0.4)
-    return False
+    _adb("push", caminho, destino)
+    r = _adb("shell", f"touch {destino}; am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE "
+                      f"-d file://{destino} >/dev/null; for i in 1 2 3 4 5 6 7 8 9 10 11 12; do "
+                      f"content query --uri content://media/external/images/media --projection "
+                      f"_display_name | grep -q '{nome}' && echo INDEXADO && break; sleep 0.3; done")
+    return "INDEXADO" in (r.stdout or "")
 
 
 def _proporcao_png(caminho):
@@ -847,7 +849,7 @@ def postar_repost(d, peca, pasta, log=None, enviar=True, shot=None, fundo="laran
     if not card:
         return falha("sem_card")
     d.click((card[0] + card[2]) // 2, (card[1] + card[3]) // 2)      # estilo com bordas/título
-    _sleep(1.0, 1.3)
+    _sleep(0.7, 0.9)
 
     # fundo laranja, CAMINHO RÁPIDO: a chamada entra já (com o quadrado laranja escondido), o
     # conta-gotas pega a cor no quadrado e pinta. Não pegou → caminho antigo (imagem laranja).
@@ -896,7 +898,7 @@ def postar_repost(d, peca, pasta, log=None, enviar=True, shot=None, fundo="laran
         d.touch.move(W // 2, y)
         time.sleep(0.04)
     d.touch.up(W // 2, yh - 68)
-    _sleep(0.6, 0.8)
+    _sleep(0.4, 0.5)
     card = _card_atual(d)
     if not card:
         return falha("card_sumiu")
@@ -944,7 +946,6 @@ def postar_repost(d, peca, pasta, log=None, enviar=True, shot=None, fundo="laran
         _limpar_indice()
         return "simulado"
     ok = publicar(d, log)
-    _limpar_indice()
     return "ok" if ok else "publicar"
 
 
