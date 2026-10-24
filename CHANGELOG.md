@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0] — 2026-10-24
+
+### Corrigido
+- fix: etiqueta com nome único por peça (não reusa o preço do cache do IG) — antes uma conta postava tudo R$ 25
+- fix: confere que o post é do brechó (e cita a peça) antes de repostar no story — não reposta o post de um estranho quando o link não abre depois de reiniciar o IG
+- fix: vídeo de abertura abre pelo caminho certo e espera a prévia sair do preto (sem a piscada no começo)
+
 ## [1.1.0] — 2026-10-22
 
 ### Adicionado
