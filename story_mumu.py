@@ -641,22 +641,97 @@ def _cor_no_conta_gotas(tela, eb):
     return sum(_perto(_cor_px(tela, x, y)) for x, y in pts) >= 2
 
 
-def abrir_repost(d, code, log=None, _de_novo=False):
-    """Post do brechó → enviar → 'Adicionar à história'. True se o editor abriu."""
+MARCA_BRECHO = "brechoquasenadaa"
+
+
+def _norm(s):
+    import html
+    import unicodedata
+    s = unicodedata.normalize("NFKD", html.unescape(str(s or "")).replace("’", "'"))
+    s = "".join(c for c in s if not unicodedata.combining(c)).lower()
+    return " ".join(s.split())
+
+
+def _post_do_brecho(d, nome=None):
+    """O post ABERTO na tela é do brechó (e, se veio `nome`, é a peça certa)? Devolve as bounds do
+    botão de enviar DESSE post (o 1º de cima), ou None. 23/10: depois de reiniciar o IG o link não
+    abriu o post, a tela ficou no feed e o bot compartilhou o 1º post do feed (@aasafe__) — o
+    botão de enviar da tela anterior também "passava" na espera. (O post aberto pelo link aparece
+    DENTRO da aba do feed, com o mesmo logo "Feed inicial" — então quem decide é o autor do 1º
+    post + o nome da peça na legenda dele, não a tela.)"""
+    try:
+        xml = d.dump_hierarchy()
+    except Exception:
+        return None
+    autores, shares, legendas = [], [], []
+    for m in re.finditer(r"<node[^>]*>", xml):
+        t = m.group(0)
+        b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', t)
+        if not b:
+            continue
+        bb = tuple(map(int, b.groups()))
+        rid = re.search(r'resource-id="([^"]*)"', t)
+        rid = rid.group(1) if rid else ""
+        tx = re.search(r'text="([^"]*)"', t)
+        txt = _norm(tx.group(1) if tx else "")
+        if rid.endswith(":id/row_feed_photo_profile_name"):
+            autores.append((bb, txt))
+        elif rid.endswith(":id/row_feed_button_share"):
+            shares.append(bb)
+        elif txt.startswith(MARCA_BRECHO + " |"):
+            legendas.append((bb, txt))
+    if not autores:
+        return None
+    topo, quem = min(autores, key=lambda a: a[0][1])
+    if not quem.startswith(MARCA_BRECHO):
+        return None
+    if nome:
+        alvo = _norm(nome)[:12]
+        # a legenda do MESMO post (a 1ª abaixo do cabeçalho) tem que citar a peça
+        leg = sorted((lg for lg in legendas if lg[0][1] > topo[1]), key=lambda lg: lg[0][1])
+        if alvo and leg and alvo not in leg[0][1]:
+            return None
+    abaixo = [s for s in shares if s[1] > topo[1]]
+    return min(abaixo, key=lambda s: s[1]) if abaixo else None
+
+
+def abrir_repost(d, code, log=None, _de_novo=False, nome=None):
+    """Post do brechó → enviar → 'Adicionar à história'. True se o editor abriu. Só compartilha
+    depois de CONFERIR que o post aberto é do brechó e é a peça certa (`nome`)."""
     desfazer_republicar(d, log)
     descartar_rascunho(d)
+    # sai de qualquer tela com botão de enviar (feed/post anterior): senão a espera "acha" o botão
+    # velho antes do link abrir o post novo
+    if d(resourceId=R + "row_feed_button_share").exists and d(resourceId=R + "profile_tab").exists:
+        d(resourceId=R + "profile_tab").click()
+        _sleep(1.0, 1.5)
     _adb("shell", "am", "start", "-a", "android.intent.action.VIEW",
          "-d", f"https://www.instagram.com/p/{code}/", "-p", "com.instagram.android")
-    if not d(resourceId=R + "row_feed_button_share").wait(timeout=20):
-        if desfazer_republicar(d, log):     # o aviso por cima impedia o post de aparecer
-            return False if _de_novo else abrir_repost(d, code, log, _de_novo=True)
-        _log(log, "  o post não abriu")
+    alvo = None
+    fim = time.time() + 20
+    while time.time() < fim and alvo is None:
+        time.sleep(1.0)
+        alvo = _post_do_brecho(d, nome)
+    if alvo is None:
+        if desfazer_republicar(d, log) and not _de_novo:   # o aviso por cima impedia o post de aparecer
+            return abrir_repost(d, code, log, _de_novo=True, nome=nome)
+        if not _de_novo:
+            _log(log, "  o link não abriu o post da peça (a tela mostrava outra coisa) — tentando de novo")
+            d.press("back")
+            _sleep(1.0, 1.5)
+            return abrir_repost(d, code, log, _de_novo=True, nome=nome)
+        _log(log, "  o post da peça não abriu (a tela mostrava outro post) — pulo, NÃO compartilho")
         return False
     _sleep(0.5, 0.7)
     # a folha de enviar às vezes demora a mostrar a fileira de baixo ("Adicionar à história") —
     # espera mais e, se não vier, fecha e abre de novo (no lote de 10, 2 peças caíram aqui)
     for tent in range(2):
-        _tocar(d, d(resourceId=R + "row_feed_button_share"))
+        if tent:
+            alvo = _post_do_brecho(d, nome)
+            if alvo is None:
+                _log(log, "  depois de reabrir a folha o post não confere mais — pulo")
+                return False
+        d.click((alvo[0] + alvo[2]) // 2, (alvo[1] + alvo[3]) // 2)   # o enviar DESTE post, não o 1º da tela
         if _tocar(d, d(description="Adicionar à história"), 14):
             break
         _log(log, "  folha de enviar sem 'Adicionar à história' — reabrindo")
@@ -853,7 +928,7 @@ def postar_repost(d, peca, pasta, log=None, enviar=True, shot=None, fundo="laran
         _limpar_indice()
         return motivo
 
-    if not abrir_repost(d, code, log):
+    if not abrir_repost(d, code, log, nome=peca.get("nome")):   # confere autor + peça antes de compartilhar
         return falha("editor")
     card = _card_atual(d)
     if not card:
