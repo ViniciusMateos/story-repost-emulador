@@ -385,11 +385,21 @@ def gerar_stickers(peca, pasta, mostrar_preco=True, chamada="", bloco=False):
     import story_card as sc
     from PIL import Image, ImageDraw
     os.makedirs(pasta, exist_ok=True)
+    # NOME ÚNICO por peça (24/10/2026): com o mesmo "qn_tag.png" toda vez, o IG reaproveitava a
+    # imagem do cache e as etiquetas da conta saíam com o preço da 1ª peça (uma conta postou tudo
+    # a R$ 25). Apaga as velhas da pasta pra não acumular.
+    for velho in os.listdir(pasta):
+        if velho.startswith(("qn_tag", "qn_cta")) and velho.endswith(".png"):
+            try:
+                os.remove(os.path.join(pasta, velho))
+            except Exception:
+                pass
+    sufixo = f"{peca.get('num') or peca.get('code') or 'x'}_{int(time.time() * 1000)}"
     linhas = etiqueta.linhas(peca, peca.get("template") or peca.get("observacao") or "")
     tag_path = None
     if linhas and mostrar_preco:
         tag = sc._etiqueta(linhas)
-        tag_path = os.path.join(pasta, "qn_tag.png")
+        tag_path = os.path.join(pasta, f"qn_tag_{sufixo}.png")
         tag.save(tag_path)
     f = sc._fonte_mao(68)
     W = 1080
@@ -417,7 +427,7 @@ def gerar_stickers(peca, pasta, mostrar_preco=True, chamada="", bloco=False):
             ImageDraw.Draw(fundo).rectangle([x0, y0, x0 + bw, y0 + bh], fill=COR_BRECHO + (255,))
             bloco_rel = ((x0 + bw / 2) / im.width, (y0 + bh / 2) / alvo_h)
         im = fundo
-    cta_path = os.path.join(pasta, "qn_cta.png")
+    cta_path = os.path.join(pasta, f"qn_cta_{sufixo}.png")   # nome único (mesmo motivo da etiqueta)
     im.save(cta_path)
     return tag_path, cta_path, bloco_rel
 
