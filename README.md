@@ -9,8 +9,11 @@ API, que o Instagram restringiu ("restricted from uploading").
 Repost **nativo** do post da peça (o card toca e abre o post, com bordas e título) em cima do
 **laranja do brechó**, com a **etiqueta de preço** no canto do card e "COMENTE “FILA” PARA GARANTIR
 A SUA!" embaixo. Pelo modo dá pra trocar o fundo pelo que o Instagram gera (bem mais rápido),
-tirar a etiqueta, mudar o texto da chamada, pôr uma pausa entre stories e abrir com o **vídeo**
-"confiram as peças disponíveis" (`assets/intro.mp4` da base).
+tirar a etiqueta, mudar o texto da chamada e pôr uma pausa entre stories.
+
+O vídeo de abertura ("confiram as peças disponíveis") **saiu do bot**: o editor de story do IG no
+emulador recodifica o vídeo e usa a imagem da prévia como 1º quadro/capa, lida com o formato de cor
+errado — sai destruída pra todo seguidor. Ele é postado na mão.
 
 ## Como funciona
 
@@ -37,7 +40,7 @@ tem trava.
 ```python
 from bots.story_mumu import story_mumu as sm
 sm.usar_serial("127.0.0.1:16416")
-sm.postar_lote(d, "brechoquasenadaa", 10, pasta, fundo="laranja", video_intro=True)
+sm.postar_lote(d, "brechoquasenadaa", 10, pasta, fundo="laranja")
 ```
 
 O IG precisa rodar o editor de story na mesma conexão do `uiautomator2` (reconectar no meio
