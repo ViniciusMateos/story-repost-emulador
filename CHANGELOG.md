@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.0] — 2026-10-27
+
+### Removido
+- chore: vídeo de abertura do Story Repost (`postar_intro`, o editor de vídeo e o parâmetro `video_intro` do `postar_lote`) — o IG do emulador usava a prévia do editor como 1º quadro/capa e saía destruída pra todo seguidor; o vídeo é postado na mão
+
+### Documentação
+- docs: README sem o vídeo de abertura
+
 ## [1.2.0] — 2026-10-24
 
 ### Corrigido
