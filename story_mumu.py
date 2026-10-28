@@ -1034,99 +1034,8 @@ def postar_repost(d, peca, pasta, log=None, enviar=True, shot=None, fundo="laran
     return "ok" if ok else "publicar"
 
 
-INTRO = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                     "assets", "intro.mp4")
-
-
-def _abrir_editor_com_video(d, log=None, shot=None):
-    """Igual ao abrir_editor_com_card, mas pro VÍDEO: a miniatura dele nasce CINZA (o IG ainda está
-    gerando) e o toque nesse estado é ignorado — o bot tocava na hora, esperava 15s e desistia
-    (run-432/434, 23/10). Aqui: abre a galeria, espera a miniatura e TOCA DE NOVO a cada ~4s até o
-    editor abrir (até ~30s por caminho)."""
-    for tentativa, caminho in enumerate((_abrir_galeria_pelo_perfil, _abrir_galeria_pelo_criar)):
-        _fechar_telas_extras(d, log)
-        descartar_rascunho(d)
-        if not caminho(d, log):
-            continue
-        th = d(resourceId=R + "gallery_grid_item_thumbnail")
-        if not th.wait(timeout=10):
-            _log(log, f"  galeria não abriu (tentativa {tentativa + 1})")
-            continue
-        _sleep(1.5, 2.0)                     # deixa o IG gerar a miniatura antes do 1º toque
-        for toque in range(8):
-            if not _tocar(d, th, 3):
-                break
-            if d(resourceId=R + "your_story_share_shortcut_button").wait(timeout=4):
-                if toque:
-                    _log(log, f"  editor do vídeo abriu no {toque + 1}º toque")
-                return True
-        if shot:
-            shot(f"falha_editor_video_{tentativa + 1}")
-    return False
-
-
-def _video_carregou(d, log=None, teto=15.0):
-    """No editor do story: a prévia do vídeo saiu do preto? Olha uma faixa no meio da tela (longe da
-    barra lateral e dos botões de baixo) — basta 2 de 5 pontos claros. True assim que aparecer."""
-    try:
-        W, H = d.window_size()
-    except Exception:
-        W, H = 900, 1600
-    pts = [(int(W * fx), int(H * fy)) for fx, fy in ((0.25, 0.45), (0.5, 0.35), (0.5, 0.6), (0.3, 0.75), (0.6, 0.5))]
-    fim = time.time() + teto
-    while time.time() < fim:
-        try:
-            tela = _print_tela()
-            claros = sum(1 for x, y in pts if sum(_cor_px(tela, x, y)) > 120)
-            if claros >= 2:
-                return True
-        except Exception:
-            pass
-        time.sleep(0.5)
-    return False
-
-
-def postar_intro(d, log=None, enviar=True, shot=None):
-    """Vídeo de ABERTURA ("confiram as peças disponíveis") antes das peças: manda o intro.mp4 pra
-    galeria (sozinho), abre a galeria do story pelo '+' do perfil, escolhe a 1ª miniatura (o
-    vídeo) e publica. True se publicou (ou montou, sem `enviar`)."""
-    if not os.path.exists(INTRO):
-        _log(log, "  sem o vídeo de abertura (assets/intro.mp4) — sigo sem ele")
-        return False
-    _limpar_indice()
-    destino = f"{PASTA}/qn_intro.mp4"
-    _adb("push", INTRO, destino)
-    r = _adb("shell", f"touch {destino}; am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE "
-                      f"-d file://{destino} >/dev/null; for i in 1 2 3 4 5 6 7 8 9 10 11 12; do "
-                      f"content query --uri content://media/external/video/media --projection "
-                      f"_display_name | grep -q qn_intro.mp4 && echo INDEXADO && break; sleep 0.4; done")
-    if "INDEXADO" not in (r.stdout or ""):
-        _log(log, "  o vídeo de abertura não apareceu na galeria — sigo sem ele")
-        return False
-    if not _abrir_editor_com_video(d, log, shot):
-        _log(log, "  não abri o editor com o vídeo de abertura — sigo sem ele")
-        descartar_rascunho(d)
-        return False
-    # o vídeo leva uns segundos pra aparecer no editor (antes disso a prévia é PRETA — medido 23/10:
-    # ~2s). Publicar com a prévia preta saía com piscada + barra branca no começo do story → espera
-    # o quadro do vídeo de verdade (pontos da tela fora do preto), até 15s, + um respiro
-    if not _video_carregou(d, log):
-        _log(log, "  o vídeo de abertura não carregou no editor — sigo sem ele")
-        descartar_rascunho(d)
-        _limpar_indice()
-        return False
-    _sleep(0.8, 1.2)
-    if shot:
-        shot("intro_antes_de_publicar")
-    if not enviar:
-        descartar_rascunho(d)
-        _limpar_indice()
-        return True
-    return publicar(d, log)
-
-
 def postar_lote(d, conta, n, pasta, log=None, enviar=True, parar=None, tentativas=2,
-                pausa_story=(0, 0), fundo="laranja", mostrar_preco=True, chamada="", video_intro=False):
+                pausa_story=(0, 0), fundo="laranja", mostrar_preco=True, chamada=""):
     """n stories na conta ATIVA; cada peça tem até `tentativas` (o fluxo só publica se passar na
     conferência). `pausa_story` = respiro entre um story e outro; `fundo`/`mostrar_preco`/`chamada`
     vêm do modo. Devolve {ok, postados, falhas}."""
@@ -1137,10 +1046,6 @@ def postar_lote(d, conta, n, pasta, log=None, enviar=True, parar=None, tentativa
     escolhidas = escolher_pecas(conta, n, pecas)
     _log(log, f"Conta: @{conta} — {len(escolhidas)} peça(s) pro story: "
               + ", ".join((p.get("nome") or p["code"])[:24] for p in escolhidas))
-    if video_intro and escolhidas and not (parar and parar()):
-        _log(log, "abertura: vídeo \"confiram as peças disponíveis\"")
-        if postar_intro(d, log, enviar=enviar):
-            _log(log, "✓ vídeo de abertura " + ("publicado" if enviar else "montado (simulação)"))
     postados, falhas = 0, 0
     for i, p in enumerate(escolhidas, start=1):
         if parar and parar():
