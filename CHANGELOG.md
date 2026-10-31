@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.3.1] — 2026-10-31
+
+### Corrigido
+- fix: figurinha de foto do story espera mais (galeria até 15s, figurinha ~10s) — com as duas instâncias do emulador ligadas ela demorava e a peça era barrada em silêncio; agora o motivo vai pro log e a tela fica em `logs/sticker_falha/`
+- fix: publicar o story responde a tela de cookies do IG ("Permitir a utilização de cookies"), que entrava na frente do editor — a segue26 não publicava nenhum story; o print da falha fica no log
+
 ## [1.3.0] — 2026-10-27
 
 ### Removido
