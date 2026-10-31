@@ -308,12 +308,25 @@ def posicionar_sticker(d, y_destino, log=None):
 def publicar(d, log=None):
     """Toca 'A tua história' e espera sair do editor. True se saiu."""
     if not _tocar(d, d(resourceId=R + "your_story_share_shortcut_button"), 8):
+        _log(log, "  não achei o botão 'A tua história' pra publicar")
+        _salvar_diag_sticker(d, "publicar_sem_botao")
         return False
     for _ in range(30):
         _sleep(0.6, 0.8)
         if not d(resourceId=R + "quick_capture_root_container").exists:
             _fechar_telas_extras(d, log)
             return True
+    # 31/10: a tela "Permitir a utilização de cookies" do IG entrou na frente (a segue26 não publicou
+    # nenhuma das 10) → responde e espera o editor fechar de novo antes de dar a peça como falha
+    from bots.auto_follow import auto_follow as af
+    if af.fechar_cookies(d, log):
+        for _ in range(15):
+            _sleep(0.6, 0.8)
+            if not d(resourceId=R + "quick_capture_root_container").exists:
+                _fechar_telas_extras(d, log)
+                return True
+    _log(log, "  toquei em publicar mas o editor não fechou")
+    _salvar_diag_sticker(d, "publicar_preso")
     return False
 
 
