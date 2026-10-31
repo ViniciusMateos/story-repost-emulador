@@ -546,19 +546,46 @@ def _add_sticker_foto(d, indice, log=None):
     if not _abrir_bandeja_stickers(d, "Sticker de foto"):
         _log(log, "  não abri o sticker de foto")
         return None
+    # 30/10: com as DUAS instâncias ligadas (brechó + segue em paralelo) a galeria e o sticker demoram
+    # mais — 8s/5s davam "mensagem"/"etiqueta" barrada em silêncio (segue17: 3 peças). Mais tempo + o
+    # motivo no log.
     th = d(resourceId=R + "gallery_sticker_grid_item_thumbnail")
-    if not th.wait(timeout=8):
+    if not th.wait(timeout=15):
+        _log(log, "  a galeria do sticker de foto não carregou")
         return None
     _sleep(0.3, 0.4)
     if th.count <= indice:
+        _log(log, "  a galeria do sticker de foto veio vazia")
         return None
     d.click(*_centro(th[indice].info["bounds"]))
-    for _ in range(14):
+    for _ in range(30):
         _sleep(0.3, 0.4)
         novos = [s for s in _stickers_na_tela(d) if s not in antes]
         if novos:
             return novos[-1]
+    _log(log, "  o sticker de foto não apareceu no story")
+    _salvar_diag_sticker(d)
     return None
+
+
+_DIAG_STK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "logs", "sticker_falha")
+
+
+def _salvar_diag_sticker(d, motivo="sticker"):
+    """31/10: o sticker de foto às vezes não entra no story mesmo esperando ~10s (só com as duas
+    instâncias ligadas), e a segue26 não conseguiu publicar nenhum story. Guarda print + dump da tela
+    em logs/sticker_falha/ (as 30 últimas) pra ver o que a tela mostrava. Nunca levanta."""
+    try:
+        os.makedirs(_DIAG_STK, exist_ok=True)
+        base = os.path.join(_DIAG_STK, f"{time.strftime('%Y%m%d_%H%M%S')}_{_serial().split(':')[-1]}_{motivo}")
+        d.screenshot(base + ".png")
+        with open(base + ".xml", "w", encoding="utf-8") as f:
+            f.write(d.dump_hierarchy())
+        arqs = sorted(os.listdir(_DIAG_STK))
+        for a in arqs[:-60]:
+            os.remove(os.path.join(_DIAG_STK, a))
+    except Exception:
+        pass
 
 
 def _fundo_laranja(d, log=None, alvo=None, segurar=0.35):
