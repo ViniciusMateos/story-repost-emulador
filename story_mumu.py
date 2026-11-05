@@ -571,30 +571,132 @@ def _abrir_bandeja_stickers(d, alvo_desc):
     return False
 
 
-def _add_sticker_foto(d, indice, log=None):
+def _miniatura_desenhada(b):
+    """A miniatura da galeria do sticker já tem IMAGEM? (04/11) Com as duas instâncias rodando, a
+    bandeja às vezes abre com a célula LISA, exatamente da cor do fundo vazio da bandeja (desvio 0 em
+    todos os prints de logs/sticker_falha): a miniatura não foi desenhada e o toque nela não faz nada.
+    'Em branco' = lisa E da cor do fundo ao lado — a imagem laranja do fundo também é lisa, mas é
+    laranja. Sem como medir → True (segue como antes)."""
+    try:
+        from PIL import ImageStat
+        im = _print_tela()
+        cel = ImageStat.Stat(im.crop((b["left"] + 10, b["top"] + 10, b["right"] - 10, b["bottom"] - 10)))
+        if max(cel.stddev) > 3:
+            return True
+        x1 = b["right"] + 20
+        x2 = min(im.width - 20, x1 + 300)
+        if x2 - x1 < 40:
+            return True
+        fundo = ImageStat.Stat(im.crop((x1, b["top"] + 10, x2, b["bottom"] - 10))).mean
+        return max(abs(a - f) for a, f in zip(cel.mean, fundo)) > 6
+    except Exception:
+        return True
+
+
+def _sticker_visivel(antes_img, b):
+    """O sticker novo APARECEU de verdade? (04/11) Com as duas instâncias rodando, a imagem às vezes
+    não decodifica e o sticker entra INVISÍVEL: o nó existe com o tamanho/posição certos, a
+    conferência final (que só olha o XML) passava, e o story saía sem o preço ou sem a chamada.
+    Compara a região do sticker com o print de ANTES dele entrar: se nada mudou ali, está invisível."""
+    try:
+        from PIL import ImageChops, ImageStat
+        if antes_img is None:
+            return True
+        _sleep(0.5, 0.6)      # o sticker entra com animação de escala
+        depois = _print_tela()
+        w, h = b[2] - b[0], b[3] - b[1]
+        cx = (max(0, b[0] + int(w * 0.15)), max(0, b[1] + int(h * 0.15)),
+              min(depois.width, b[2] - int(w * 0.15)), min(depois.height, b[3] - int(h * 0.15)))
+        if cx[2] - cx[0] < 10 or cx[3] - cx[1] < 10:
+            return True
+        dif = ImageStat.Stat(ImageChops.difference(antes_img.crop(cx), depois.crop(cx))).mean
+        return max(dif) > 8
+    except Exception:
+        return True
+
+
+def _fechar_bandeja(d):
+    """Fecha a bandeja de stickers — SÓ se ela estiver aberta (back no editor sem a bandeja abre o
+    'descartar story?')."""
+    if d(resourceId=R + "gallery_sticker_grid_container").exists:
+        d.press("back")
+        _sleep(1.0, 1.4)
+
+
+def _add_sticker_foto(d, indice, log=None, tentativas=3):
     """Stickers → Sticker de foto → miniatura `indice` (0 = mais recente). Devolve as bounds do
-    sticker novo (o que não existia antes)."""
+    sticker novo (o que não existia antes).
+    04/11: antes de tocar, espera a miniatura ser DESENHADA; se ela não desenha ou o sticker não
+    entra, fecha e reabre a bandeja (até `tentativas`) em vez de desistir — antes isso descartava o
+    story inteiro e refazia a peça do zero (~1-2 min cada)."""
     antes = set(_stickers_na_tela(d))
-    if not _abrir_bandeja_stickers(d, "Sticker de foto"):
-        _log(log, "  não abri o sticker de foto")
+    try:
+        antes_img = _print_tela()
+    except Exception:
+        antes_img = None
+
+    def conferir(s, t):
+        """Devolve o sticker se ele está VISÍVEL; invisível → apaga e devolve None (tenta de novo).
+        Se nem apagar der, devolve False (o chamador desiste: publicar com ele seria pior)."""
+        if _sticker_visivel(antes_img, s):
+            if t > 1:
+                _log(log, f"  sticker de foto entrou na tentativa {t}")
+            return s
+        _log(log, f"  o sticker entrou INVISÍVEL (imagem não carregou) — apagando ({t}/{tentativas})")
+        _salvar_diag_sticker(d, "invisivel")
+        if not _apagar_sticker(d, s):
+            _log(log, "  não consegui apagar o sticker invisível")
+            return False
         return None
-    # 30/10: com as DUAS instâncias ligadas (brechó + segue em paralelo) a galeria e o sticker demoram
-    # mais — 8s/5s davam "mensagem"/"etiqueta" barrada em silêncio (segue17: 3 peças). Mais tempo + o
-    # motivo no log.
-    th = d(resourceId=R + "gallery_sticker_grid_item_thumbnail")
-    if not th.wait(timeout=15):
-        _log(log, "  a galeria do sticker de foto não carregou")
-        return None
-    _sleep(0.3, 0.4)
-    if th.count <= indice:
-        _log(log, "  a galeria do sticker de foto veio vazia")
-        return None
-    d.click(*_centro(th[indice].info["bounds"]))
-    for _ in range(30):
+
+    for t in range(1, tentativas + 1):
+        if t > 1:
+            _fechar_bandeja(d)
+            novos = [s for s in _stickers_na_tela(d) if s not in antes]
+            if novos:          # entrou atrasado, depois que já tínhamos desistido de esperar
+                r = conferir(novos[-1], t)
+                if r is False:
+                    return None
+                if r:
+                    return r
+        if not _abrir_bandeja_stickers(d, "Sticker de foto"):
+            _log(log, "  não abri o sticker de foto")
+            return None
+        # 30/10: com as DUAS instâncias ligadas (brechó + segue em paralelo) a galeria e o sticker
+        # demoram mais — 8s/5s davam "mensagem"/"etiqueta" barrada em silêncio. Mais tempo.
+        th = d(resourceId=R + "gallery_sticker_grid_item_thumbnail")
+        if not th.wait(timeout=15):
+            _log(log, f"  a galeria do sticker de foto não carregou ({t}/{tentativas})")
+            continue
         _sleep(0.3, 0.4)
-        novos = [s for s in _stickers_na_tela(d) if s not in antes]
-        if novos:
-            return novos[-1]
+        if th.count <= indice:
+            _log(log, f"  a galeria do sticker de foto veio vazia ({t}/{tentativas})")
+            continue
+        b = th[indice].info["bounds"]
+        fim = time.time() + 8
+        desenhada = _miniatura_desenhada(b)
+        while not desenhada and time.time() < fim:
+            time.sleep(0.8)
+            desenhada = _miniatura_desenhada(b)
+        if not desenhada:
+            _log(log, f"  miniatura do sticker em branco — reabrindo a galeria ({t}/{tentativas})")
+            continue
+        d.click(*_centro(b))
+        entrou = None
+        for _ in range(30):
+            _sleep(0.3, 0.4)
+            novos = [s for s in _stickers_na_tela(d) if s not in antes]
+            if novos:
+                entrou = novos[-1]
+                break
+        if entrou:
+            r = conferir(entrou, t)
+            if r is False:
+                return None
+            if r:
+                return r
+            continue
+        _log(log, f"  o sticker de foto não entrou — reabrindo a galeria ({t}/{tentativas})")
     _log(log, "  o sticker de foto não apareceu no story")
     _salvar_diag_sticker(d)
     return None
