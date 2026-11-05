@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.2] — 2026-11-05
+
+### Corrigido
+- fix: sticker de foto conferido pela **imagem** — com as duas instâncias ligadas a miniatura da galeria às vezes não era desenhada (o toque não fazia nada e o story era refeito do zero) e o sticker podia entrar **invisível**, saindo publicado sem o preço ou sem a chamada mesmo "conferido"; agora espera a miniatura, compara a região do sticker com o print de antes e reabre a galeria até 3 vezes (prints em `logs/sticker_falha/`)
+- fix: publicar responde a janela "Partilhar em" (história do Instagram/Facebook) tocando em "Partilhar"
+
+### Documentação
+- docs: README com a conferência do sticker e o Partilhar em
+
 ## [1.3.1] — 2026-10-31
 
 ### Corrigido
