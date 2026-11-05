@@ -305,6 +305,24 @@ def posicionar_sticker(d, y_destino, log=None):
     return _bounds_sticker(d) is not None
 
 
+def _responder_partilhar_em(d, log=None):
+    """02/11: depois de 'A tua história' o IG passou a abrir a janela 'Partilhar em' (A tua história
+    marcada + A tua história no Facebook desmarcada + botão 'Partilhar') — sem responder, o editor
+    não fechava e a peça era barrada (segue17, calça alfaiataria). Toca 'Partilhar' sem mexer no
+    Facebook. True se respondeu."""
+    if not (d(resourceId=R + "add_to_story_dual_destination_share_sheet_ig_story_row_title").exists
+            or d(text="Partilhar em").exists):
+        return False
+    btn = d(text="Partilhar")
+    if not btn.exists:
+        btn = d(resourceId=R + "bb_primary_action_container")
+    if btn.exists:
+        _log(log, "  janela 'Partilhar em' — só no Instagram, tocando em Partilhar")
+        _tocar(d, btn, 2)
+        return True
+    return False
+
+
 def publicar(d, log=None):
     """Toca 'A tua história' e espera sair do editor. True se saiu."""
     if not _tocar(d, d(resourceId=R + "your_story_share_shortcut_button"), 8):
@@ -316,6 +334,7 @@ def publicar(d, log=None):
         if not d(resourceId=R + "quick_capture_root_container").exists:
             _fechar_telas_extras(d, log)
             return True
+        _responder_partilhar_em(d, log)
     # 31/10: a tela "Permitir a utilização de cookies" do IG entrou na frente (a segue26 não publicou
     # nenhuma das 10) → responde e espera o editor fechar de novo antes de dar a peça como falha
     from bots.auto_follow import auto_follow as af
