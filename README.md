@@ -28,6 +28,14 @@ errado — sai destruída pra todo seguidor. Ele é postado na mão.
 5. **Cada etapa é conferida pelo próprio bot**: galeria com uma imagem por vez, formato de cada
    sticker, cor do fundo, posições. Se algo não bater, descarta e tenta a peça de novo —
    **nada é publicado sem passar na conferência final**.
+6. **Sticker de foto conferido pela imagem**, não só pelo XML: antes de tocar, espera a miniatura
+   da galeria ser desenhada (com as duas instâncias ligadas ela às vezes fica em branco e o toque não
+   faz nada); depois de entrar, compara a região do sticker com o print de antes, porque ele pode
+   entrar **invisível** (imagem que não carregou), e aí o story sairia sem o preço ou sem a chamada.
+   Em branco ou invisível → fecha e reabre a galeria (apaga o invisível), até 3 vezes. Prints das
+   falhas em `logs/sticker_falha/`.
+7. Ao publicar, responde a janela **"Partilhar em"** (história do Instagram/Facebook) tocando em
+   "Partilhar", só no Instagram.
 
 ## Onde roda
 
