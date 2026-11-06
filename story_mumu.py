@@ -994,6 +994,68 @@ def escolher_pecas(conta, n, pecas):
     return novas[:n]
 
 
+# ─────────── modo DROP (06/11/2026, pedido do Vinicius) ───────────
+# Só as peças DISPONÍVEIS do último drop postado, precedidas da arte de abertura "DROP ON!".
+ABERTURA_DROP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "assets",
+                             "abertura_drop.jpg")
+
+
+def ultimo_drop(pecas):
+    """Id do último drop POSTADO = o maior drop_id que tem peça com post no IG (as vendidas contam
+    pra achar o drop — senão um drop todo vendido faria o modo pegar o anterior)."""
+    ids = [p.get("drop_id") for p in pecas if p.get("drop_id") and p.get("code")]
+    return max(ids) if ids else None
+
+
+def _estado_drop(conta, drop):
+    with _trava_estado:
+        return dict(((_estado().get(conta) or {}).get("drops") or {}).get(str(drop)) or {})
+
+
+def escolher_pecas_drop(conta, pecas, n=0):
+    """As peças DISPONÍVEIS (não vendidas, com post) do último drop, na ordem do #p, tirando as que
+    esta conta JÁ postou deste drop (rodar de novo completa só o que faltou). n>0 = teto.
+    Devolve (drop_id, peças)."""
+    drop = ultimo_drop(pecas)
+    if drop is None:
+        return None, []
+    feitas = set(_estado_drop(conta, drop).get("feitas") or [])
+    disp = [p for p in pecas if p.get("drop_id") == drop and p.get("code") and not p.get("vendida")
+            and p["code"] not in feitas]
+    disp.sort(key=lambda p: (p.get("num") or 0))
+    return drop, (disp[:n] if n else disp)
+
+
+def _marcar_drop(conta, drop, chave, code=None):
+    with _trava_estado:
+        est = _estado()
+        ed = est.setdefault(conta, {}).setdefault("drops", {}).setdefault(str(drop), {})
+        if chave == "feitas":
+            ed.setdefault("feitas", []).append(code)
+        else:
+            ed[chave] = time.time()
+        _salvar_estado(est)
+
+
+def postar_imagem(d, caminho, log=None, enviar=True):
+    """Story de uma IMAGEM pronta (a abertura do drop): a galeria fica só com ela → abre o editor
+    → publica. 'ok' | 'simulado' | motivo (NÃO publicou)."""
+    if not os.path.exists(caminho):
+        return "sem_imagem"
+    if not _galeria_so(caminho):
+        return "galeria"
+    if not abrir_editor_com_card(d, log):
+        _limpar_indice()
+        return "editor"
+    if not enviar:
+        descartar_rascunho(d)
+        _limpar_indice()
+        return "simulado"
+    ok = publicar(d, log)
+    _limpar_indice()
+    return "ok" if ok else "publicar"
+
+
 def marcar_postada(conta, code):
     with _trava_estado:   # brechó e segue podem postar ao mesmo tempo (threads) → um de cada vez
         est = _estado()
@@ -1238,19 +1300,80 @@ def postar_repost(d, peca, pasta, log=None, enviar=True, shot=None, fundo="laran
     return "ok" if ok else "publicar"
 
 
+def _sair_do_post(d):
+    """Depois do último story o IG fica NO POST do brechó com a folha de partilhar ("Adicionar à
+    história", WhatsApp, Copiar ligação…) aberta por cima (06/11, print na troca de conta) → a troca
+    de conta seguinte não achava o seletor, reabria o IG (~30s) e às vezes pulava a conta ("ficou em
+    ?", segue31). Cada peça abre o post DELA por cima do anterior (link) → são ~11 telas empilhadas;
+    voltar com back não chega no perfil (testado: parou num post do meio). Então fecha e abre o IG
+    (estado limpo, ~15s) e vai pro perfil. Nunca levanta."""
+    try:
+        from bots.auto_follow import auto_follow as af
+        af.reabrir_ig(d, None, "fim dos stories da conta")
+        af.garantir_perfil(d, None)
+    except Exception:
+        pass
+
+
+def _esperar_pausa(log, pausa_story, parar):
+    if not (pausa_story and pausa_story[1] > 0):
+        return
+    seg = random.uniform(*pausa_story)
+    _log(log, f"próximo story em {int(seg)}s…")
+    fim = time.time() + seg
+    while time.time() < fim:
+        if parar and parar():
+            break
+        time.sleep(max(0.0, min(1.0, fim - time.time())))   # nunca negativo
+
+
 def postar_lote(d, conta, n, pasta, log=None, enviar=True, parar=None, tentativas=2,
-                pausa_story=(0, 0), fundo="laranja", mostrar_preco=True, chamada=""):
+                pausa_story=(0, 0), fundo="laranja", mostrar_preco=True, chamada="",
+                selecao="aleatorio", abertura=False):
     """n stories na conta ATIVA; cada peça tem até `tentativas` (o fluxo só publica se passar na
     conferência). `pausa_story` = respiro entre um story e outro; `fundo`/`mostrar_preco`/`chamada`
-    vêm do modo. Devolve {ok, postados, falhas}."""
+    vêm do modo. `selecao`='drop_novo' (06/11) = só as disponíveis do ÚLTIMO drop postado, na ordem
+    do #p (n=0 = todas), e `abertura` posta antes a arte "DROP ON!" (1x por drop por conta).
+    Devolve {ok, postados, falhas}."""
     import random
     tentativas = max(1, int(tentativas or 1))
     import story_card as sc
-    pecas = sc.fetch_pecas()
-    escolhidas = escolher_pecas(conta, n, pecas)
-    _log(log, f"Conta: @{conta} — {len(escolhidas)} peça(s) pro story: "
-              + ", ".join((p.get("nome") or p["code"])[:24] for p in escolhidas))
+    modo_drop = str(selecao or "").lower() in ("drop", "drop_novo")
+    drop = None
+    if modo_drop:
+        drop, escolhidas = escolher_pecas_drop(conta, sc.fetch_pecas(incluir_vendidas=True), int(n or 0))
+        if drop is None:
+            _log(log, f"Conta: @{conta} — não achei o último drop postado no app do Brechó")
+            return {"ok": False, "postados": 0, "falhas": 0}
+        _log(log, f"Conta: @{conta} — drop #{drop}: {len(escolhidas)} peça(s) disponível(is) pra postar"
+                  + (": " + ", ".join((p.get("nome") or p["code"])[:24] for p in escolhidas) if escolhidas
+                     else " (já postou todas deste drop)"))
+    else:
+        escolhidas = escolher_pecas(conta, n, sc.fetch_pecas())
+        _log(log, f"Conta: @{conta} — {len(escolhidas)} peça(s) pro story: "
+                  + ", ".join((p.get("nome") or p["code"])[:24] for p in escolhidas))
     postados, falhas = 0, 0
+    # abertura "DROP ON!" ANTES das peças, 1x por drop nesta conta. Se não sair, NÃO posta as peças
+    # (ficariam sem a abertura na frente) — a próxima rodada faz abertura + peças na ordem.
+    if modo_drop and abertura and escolhidas and not _estado_drop(conta, drop).get("abertura"):
+        _log(log, "[progress] 0 {} abertura do drop".format(len(escolhidas)))
+        r = "?"
+        for tent in range(1, tentativas + 1):
+            try:
+                r = postar_imagem(d, ABERTURA_DROP, log, enviar=enviar)
+            except Exception as e:
+                r = f"erro:{e}"
+                descartar_rascunho(d)
+            if r in ("ok", "simulado"):
+                break
+            _log(log, f"  tentativa {tent} da abertura não passou ({r})")
+        if r not in ("ok", "simulado"):
+            _log(log, f"! a abertura do drop NÃO saiu ({r}) — paro esta conta pra não postar as peças sem ela")
+            return {"ok": False, "postados": 0, "falhas": 1}
+        if enviar:
+            _marcar_drop(conta, drop, "abertura")
+        _log(log, "✓ story de abertura do drop (DROP ON!)")
+        _esperar_pausa(log, pausa_story, parar)
     for i, p in enumerate(escolhidas, start=1):
         if parar and parar():
             break
@@ -1273,17 +1396,14 @@ def postar_lote(d, conta, n, pasta, log=None, enviar=True, parar=None, tentativa
             postados += 1
             if enviar:
                 marcar_postada(conta, p["code"])
+                if modo_drop:
+                    _marcar_drop(conta, drop, "feitas", p["code"])
             _log(log, f"✓ story {i}/{len(escolhidas)}: {nome} ({int(dt)}s, conferido)")
         else:
             falhas += 1
             _log(log, f"! story {i}/{len(escolhidas)} NÃO publicado ({r}) — {nome}")
-        if i < len(escolhidas) and pausa_story and pausa_story[1] > 0:
-            seg = random.uniform(*pausa_story)
-            _log(log, f"próximo story em {int(seg)}s…")
-            fim = time.time() + seg
-            while time.time() < fim:
-                if parar and parar():
-                    break
-                time.sleep(max(0.0, min(1.0, fim - time.time())))   # nunca negativo
+        if i < len(escolhidas):
+            _esperar_pausa(log, pausa_story, parar)
+    _sair_do_post(d)   # deixa no PERFIL (sem a folha de partilhar) pra próxima troca de conta
     _log(log, f"[progress] {len(escolhidas)} {len(escolhidas)} concluído")
     return {"ok": falhas == 0, "postados": postados, "falhas": falhas}
