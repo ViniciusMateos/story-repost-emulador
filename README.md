@@ -17,7 +17,11 @@ errado — sai destruída pra todo seguidor. Ele é postado na mão.
 
 ## Como funciona
 
-1. Escolhe as peças (rodízio por conta: não repete até postar todas) pelas peças do app do brechó.
+1. Escolhe as peças do app do brechó: rodízio por conta (não repete até postar todas) ou, no modo
+   **drop**, só as disponíveis do último drop postado, na ordem do `#p`. No modo drop a arte
+   **"DROP ON!"** (`assets/abertura_drop.jpg`) sai antes das peças, uma vez por drop em cada conta;
+   se ela não sair, a conta para, pra nenhuma peça entrar sem a abertura. Cada conta lembra o que já
+   postou daquele drop (`story_mumu_state.json`), e rodar de novo completa só o que faltou.
 2. Abre o post → enviar → "Adicionar à história" → toca no card (estilo com bordas). Se um toque
    cair no "republicar" do feed, ele desfaz ("Anular").
 3. Fundo laranja: a chamada entra com um quadrado laranja escondido embaixo, o **conta-gotas** pega
@@ -35,7 +39,14 @@ errado — sai destruída pra todo seguidor. Ele é postado na mão.
    Em branco ou invisível → fecha e reabre a galeria (apaga o invisível), até 3 vezes. Prints das
    falhas em `logs/sticker_falha/`.
 7. Ao publicar, responde a janela **"Partilhar em"** (história do Instagram/Facebook) tocando em
-   "Partilhar", só no Instagram.
+   "Partilhar", só no Instagram. Depois vigia alguns segundos pelos avisos que chegam atrasados: o do
+   mapa ("Quando mencionas um negócio…", sempre **Agora não**) e o de 1ª vez com "OK" + "Gerir
+   definições".
+8. **Galeria na ordem certa**: ela ordena pelo `date_added` do índice de fotos, que tem resolução de
+   1 s. As imagens entram uma por vez, esperando cada uma ser indexada, senão duas no mesmo segundo
+   trocam de lugar.
+9. No fim da conta **fecha e abre o Instagram** e vai pro perfil: cada peça abre o post dela por cima
+   do anterior, com a folha de compartilhar aberta, e a troca de conta seguinte não achava o seletor.
 
 ## Onde roda
 
