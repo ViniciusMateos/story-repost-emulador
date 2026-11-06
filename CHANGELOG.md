@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.4.0] — 2026-11-06
+
+### Adicionado
+- feat: modo **drop** — só as peças disponíveis do último drop postado, na ordem do `#p`, com a arte "DROP ON!" antes; cada conta lembra o que já postou daquele drop e rodar de novo completa o que faltou
+- feat: no fim da conta reabre o Instagram e vai pro perfil, pra troca de conta seguinte não travar no seletor
+
+### Corrigido
+- fix: galeria na ordem certa — imagens indexadas no mesmo segundo trocavam de lugar
+- fix: avisos que chegam atrasados depois de publicar (mapa e "OK / Gerir definições") não sobram mais na tela
+
+### Documentação
+- docs: README com o modo drop
+
 ## [1.3.2] — 2026-11-05
 
 ### Corrigido
