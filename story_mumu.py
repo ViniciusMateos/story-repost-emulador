@@ -91,17 +91,30 @@ def limpar_galeria():
     _limpar_indice()
 
 
-def _fechar_telas_extras(d, log=None):
-    """Telas que o IG joga no meio (1º uso no aparelho: contatos, notificações…)."""
-    for _ in range(3):
+def _fechar_telas_extras(d, log=None, espera=0.0):
+    """Telas que o IG joga no meio (1º uso no aparelho: contatos, notificações…). `espera` = segundos
+    vigiando avisos que chegam ATRASADOS depois de publicar. 05/11: story com menção ao brechó (conta
+    comercial) abre "Quando mencionas um negócio, a tua história pode aparecer no mapa" (Ver o mapa /
+    Agora não → SEMPRE "Agora não") e, por trás, um aviso de 1ª vez com "OK" + "Gerir definições"."""
+    fim = time.time() + espera
+    for _ in range(8):
+        tocou = False
         for t in ("Ignorar", "Agora não", "Não permitir", "Agora nao"):
             if d(text=t).exists:
                 _log(log, f"  tela extra do IG — '{t}'")
                 _tocar(d, d(text=t), 2)
                 _sleep(1.5, 2.5)
+                tocou = True
                 break
-        else:
-            return
+        if not tocou and d(text="Gerir definições").exists and d(text="OK").exists:
+            _log(log, "  aviso de 1ª vez (OK / Gerir definições) — OK")
+            _tocar(d, d(text="OK"), 2)
+            _sleep(1.2, 1.8)
+            tocou = True
+        if not tocou:
+            if time.time() >= fim:
+                return
+            time.sleep(0.8)
 
 
 def desfazer_republicar(d, log=None):
@@ -332,7 +345,7 @@ def publicar(d, log=None):
     for _ in range(30):
         _sleep(0.6, 0.8)
         if not d(resourceId=R + "quick_capture_root_container").exists:
-            _fechar_telas_extras(d, log)
+            _fechar_telas_extras(d, log, espera=4.0)   # aviso do mapa chega atrasado (05/11)
             return True
         _responder_partilhar_em(d, log)
     # 31/10: a tela "Permitir a utilização de cookies" do IG entrou na frente (a segue26 não publicou
@@ -342,7 +355,7 @@ def publicar(d, log=None):
         for _ in range(15):
             _sleep(0.6, 0.8)
             if not d(resourceId=R + "quick_capture_root_container").exists:
-                _fechar_telas_extras(d, log)
+                _fechar_telas_extras(d, log, espera=4.0)   # aviso do mapa chega atrasado (05/11)
                 return True
     _log(log, "  toquei em publicar mas o editor não fechou")
     _salvar_diag_sticker(d, "publicar_preso")
