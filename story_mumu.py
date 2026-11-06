@@ -480,16 +480,46 @@ def _limpar_indice():
                   f"rm -f {PASTA}/*; mkdir -p {PASTA}")
 
 
+def _date_added(nome):
+    r = _adb("shell", "content query --uri content://media/external/images/media --projection date_added "
+                      f"--where \"relative_path='Pictures/QuaseNada/' AND _display_name='{nome}'\"")
+    m = re.search(r"date_added=(\d+)", getattr(r, "stdout", "") or "")
+    return int(m.group(1)) if m else None
+
+
+def _escanear_em_ordem(destinos, espera=8.0):
+    """Indexa os arquivos UM POR VEZ, na ordem da lista (o último fica o mais recente = 1ª miniatura).
+    A grade da galeria do IG ordena pelo date_added do MediaStore, que tem resolução de 1 s: dois
+    arquivos indexados no mesmo segundo saem em ordem ALEATÓRIA (pré-drop da segue21, 05/11: a foto 02
+    virou capa no lugar da 01). Espera cada um entrar no índice e deixa 1,2 s antes do próximo.
+    True se todos entraram com date_added crescente."""
+    datas = []
+    for k, dest in enumerate(destinos):
+        if k:
+            time.sleep(1.2)
+        _adb("shell", "am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
+             "-d", f"file://{dest}")
+        fim = time.time() + espera
+        da = None
+        while da is None and time.time() < fim:
+            time.sleep(0.3)
+            da = _date_added(os.path.basename(dest))
+        if da is None:
+            return False
+        datas.append(da)
+    return all(a < b for a, b in zip(datas, datas[1:]))
+
+
 def _push_galeria(caminhos):
     """Manda os PNGs pra galeria; o ÚLTIMO da lista fica como o mais recente (1ª miniatura)."""
     _limpar_indice()
+    destinos = []
     for c in caminhos:
         destino = f"{PASTA}/{os.path.basename(c)}"
         _adb("push", c, destino)
         _adb("shell", "touch", destino)   # o push preserva a data do arquivo → força 'agora'
-        _adb("shell", "am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
-             "-d", f"file://{destino}")
-        time.sleep(0.3)
+        destinos.append(destino)
+    return _escanear_em_ordem(destinos)
 
 
 def _stickers_na_tela(d):
